@@ -10,7 +10,6 @@ app = FastAPI(
 )
 
 # Load the Cardiff NLP Twitter RoBERTa model
-# This downloads a ~500MB model into memory on the first run
 print("Loading RoBERTa Model... This may take a moment.")
 classifier = pipeline(
     "text-classification", 
@@ -22,18 +21,14 @@ class TweetRequest(BaseModel):
     text: str
 
 def preprocess_tweet(text: str) -> str:
-    # 1. Remove URLs (http/https/www) as they don't contribute to sentiment
     text = re.sub(r"http\S+|www\S+|https\S+", '', text, flags=re.MULTILINE)
-    # 2. Standardize handles to '@user' to match the model's training data
     text = re.sub(r'\@\w+', '@user', text)
-    # 3. Strip extra whitespace
     return text.strip()
 
 @app.post("/api/detect")
 def detect_toxicity(request: TweetRequest):
     start_time = time.time()
     
-    # Sanitize the input
     clean_text = preprocess_tweet(request.text)
     
     # Edge case: If the tweet was only a link and is now empty
