@@ -1,4 +1,5 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from transformers import pipeline
 import re
@@ -7,6 +8,15 @@ import time
 app = FastAPI(
     title="Toxicity Classification API",
     description="A microservice for detecting hate speech in social media text."
+)
+
+# 1. ADD CORS MIDDLEWARE
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all frontends to connect. You can restrict this to ["http://localhost:3000"] later.
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Load the Cardiff NLP Twitter RoBERTa model
@@ -35,25 +45,28 @@ def detect_toxicity(request: TweetRequest):
     if not clean_text:
         return {"error": "Tweet contains no readable text after preprocessing."}
         
-    # Run the classification
-    # The pipeline returns a list like: [{'label': 'hate', 'score': 0.98}]
-    result = classifier(clean_text)[0]
-    
-    # Clean up the output for the frontend
-    label = result['label'].upper()
-    confidence = round(result['score'] * 100, 2)
-    process_time = round((time.time() - start_time) * 1000, 2)
-    
-    return {
-        "original_tweet": request.text,
-        "clean_text": clean_text,
-        "prediction": {
-            "label": label,  
-            "confidence_score": f"{confidence}%",
-            "is_toxic": label == "HATE"
-        },
-        "metadata": {
-            "processing_time_ms": process_time,
-            "model_used": "cardiffnlp/twitter-roberta-base-hate-latest"
+    try:
+        # 2. ADD TRUNCATION: Prevents the API from crashing if the text is over 512 tokens
+        result = classifier(clean_text, truncation=True, max_length=512)[0]
+        
+        # Clean up the output for the frontend
+        label = result['label'].upper()
+        confidence = round(result['score'] * 100, 2)
+        process_time = round((time.time() - start_time) * 1000, 2)
+        
+        return {
+            "original_tweet": request.text,
+            "clean_text": clean_text,
+            "prediction": {
+                "label": label,  
+                "confidence_score": f"{confidence}%",
+                "is_toxic": label == "HATE"
+            },
+            "metadata": {
+                "processing_time_ms": process_time,
+                "model_used": "cardiffnlp/twitter-roberta-base-hate-latest"
+            }
         }
-    }
+    except Exception as e:
+        # Catch any unexpected model errors cleanly instead of crashing the server
+        raise HTTPException(status_code=500, detail=f"Model inference failed: {str(e)}")
